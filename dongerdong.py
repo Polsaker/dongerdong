@@ -10,6 +10,8 @@ import random
 import copy
 import datetime
 import threading
+import importlib
+import subprocess
 import peewee
 from pyfiglet import Figlet
 from matrix_client.client import MatrixClient
@@ -72,6 +74,7 @@ class DongerDong(object):
         timeout_checker = threading.Thread(target=self._timeout)
         timeout_checker.daemon = True
         timeout_checker.start()
+        self.import_extcmds()
     
     def connect(self):
         try:
@@ -150,228 +153,276 @@ class DongerDong(object):
         ev = Message(data)
         print('> {0}'.format(ev))
 
-        if ev.is_command and ev.target == self.channel:
-            if ev.command in ('fight', 'duel', 'deathmatch') and not self.gameRunning:
-                if not ev.args:
-                    self.html_message(ev.target, 'Can you even <b>READ</b>?! It is !{0} <nick>{1}'.format(ev.command, " [othernick] [...] " if ev.command == "fight" else ""))
-                    return
-                
-                if ev.source in ev.args:
-                    return self.html_message(ev.target, "Don't fight yourself, dummy.")
-                
-                if ev.command == 'deathmatch':
-                    return self.message(ev.target, 'Deathmatches not implemented yet')
-
-                if ev.command == "deathmatch" and len(ev.args) > 1:
-                    return self.html_message(ev.target, "Deathmatches are 1v1 only.")
-                
-                if ev.command == "duel" and len(ev.args) > 1:
-                    return self.html_message(ev.target, "Challenges are 1v1 only.")
-                
-                self.fight(players=[ev.source] + ev.args,
-                           deathmatch=True if ev.command == "deathmatch" else False,
-                           versusone=True if (ev.command == "deathmatch" or ev.command == "duel") else False)
-            elif ev.command == "accept" and not self.gameRunning:
-                if not ev.args:
-                    self.message(ev.target, "Can you read? It is !accept <nick>")
-                    return
-
-                challenger = self.accounts.get(ev.args[0].lower(), ev.args[0].lower())
-                opportunist = False
-
-                # Check if the user was challenged
-                try:
-                    if ev.source.lower() not in self.pendingFights[challenger]['pendingaccept']:
-                        if "*" in self.pendingFights[challenger]['pendingaccept']:
-                            if ev.source.lower() == challenger:
-                                self.message(ev.target, "You're trying to fight yourself?")
-                                return
-
-                            opportunist = True
-                        else:
-                            self.message(ev.target, "Err... Maybe you meant to say \002!fight {0}\002? They never challenged you.".format(ev.args[0]))
-                            return
-                except KeyError:  # self.pendingFights[x] doesn't exist
-                    self.message(ev.target, "Err... Maybe you meant to say \002!fight {0}\002? They never challenged you.".format(ev.args[0]))
-                    return
-
-                # Check if the challenger is here
-                if ev.args[0].lower() not in map(str.lower, self.accounts):
-                    self.message(ev.target, "They're not here anymore - maybe they were intimidated by your donger.")
-                    del self.pendingFights[challenger]  # remove fight.
-                    return
-
-                # OK! This player accepted the fight.
-                self.pendingFights[challenger]['players'].append(ev.source)
-                if not opportunist:
-                    self.pendingFights[challenger]['pendingaccept'].remove(ev.source.lower())
-                else:
-                    self.pendingFights[challenger]['pendingaccept'].remove('*')
-
-                # Check if everybody accepted
-                if not self.pendingFights[challenger]['pendingaccept']:
-                    # Start the game!
-                    self.start(self.pendingFights[challenger])
-
-            elif ev.command == "hit" and self.gameRunning:
-                if ev.source != self.turnlist[self.currentTurn]:
-                    self.message(self.channel, "It's not your fucking turn!")
-                    return
-
-                if not ev.args:  # pick a random living thing
-                    livingThings = [self.players[player]['nick'] for player in self.players if self.players[player]['hp'] > 0 and player != ev.source.lower()]
-                    self.hit(ev.source, random.choice(livingThings))
-                else:  # The user picked a thing. Check if it is alive
-                    if self.accounts.get(ev.args[0].lower()) not in self.players:
-                        self.message(self.channel, "You should hit something that is actually playing...")
+        if ev.is_command:
+            if ev.target == self.channel:
+                if ev.command in ('fight', 'duel', 'deathmatch') and not self.gameRunning:
+                    if not ev.args:
+                        self.html_message(ev.target, 'Can you even <b>READ</b>?! It is !{0} <nick>{1}'.format(ev.command, " [othernick] [...] " if ev.command == "fight" else ""))
                         return
-                    if self.accounts.get(ev.args[0].lower()) == ev.source.lower():
-                        self.message(self.channel, "Stop hitting yourself!")
-                        return
-                    if self.players[self.accounts.get(ev.args[0].lower())]['hp'] <= 0:
-                        self.message(self.channel, "Do you REALLY want to hit a corpse?")
+                    
+                    if ev.source in ev.args:
+                        return self.html_message(ev.target, "Don't fight yourself, dummy.")
+                    
+                    if ev.command == 'deathmatch':
+                        return self.message(ev.target, 'Deathmatches not implemented yet')
+
+                    if ev.command == "deathmatch" and len(ev.args) > 1:
+                        return self.html_message(ev.target, "Deathmatches are 1v1 only.")
+                    
+                    if ev.command == "duel" and len(ev.args) > 1:
+                        return self.html_message(ev.target, "Challenges are 1v1 only.")
+                    
+                    self.fight(players=[ev.source] + ev.args,
+                            deathmatch=True if ev.command == "deathmatch" else False,
+                            versusone=True if (ev.command == "deathmatch" or ev.command == "duel") else False)
+                elif ev.command == "accept" and not self.gameRunning:
+                    if not ev.args:
+                        self.message(ev.target, "Can you read? It is !accept <nick>")
                         return
 
-                    self.hit(ev.source, self.players[self.accounts.get(ev.args[0].lower())]['nick'])
-            elif ev.command == "heal" and self.gameRunning:
-                if ev.source != self.turnlist[self.currentTurn]:
-                    self.message(self.channel, "It's not your fucking turn!")
-                    return
+                    challenger = self.accounts.get(ev.args[0].lower(), ev.args[0].lower())
+                    opportunist = False
 
-                self.heal(ev.source)
-            elif ev.command == "praise" and self.gameRunning:
-                if ev.source != self.turnlist[self.currentTurn]:
-                    self.message(self.channel, "It's not your fucking turn!")
-                    return
-
-                if self.deathmatch:
-                    self.message(ev.target, "You can't praise during deathmatches. It's still your turn.")
-                    return
-
-                if self.players[ev.source.lower()]['praised']:
-                    self.message(ev.target, "You can only praise once per game. It's still your turn.")
-                    return
-
-                if not ev.args:
-                    ptarget = ev.source
-                else:
+                    # Check if the user was challenged
                     try:
-                        ptarget = self.players[self.accounts.get(ev.args[0].lower(), ev.args[0])]['nick']
-                    except KeyError:
-                        self.message(ev.target, "Player not found.")
+                        if ev.source.lower() not in self.pendingFights[challenger]['pendingaccept']:
+                            if "*" in self.pendingFights[challenger]['pendingaccept']:
+                                if ev.source.lower() == challenger:
+                                    self.message(ev.target, "You're trying to fight yourself?")
+                                    return
+
+                                opportunist = True
+                            else:
+                                self.message(ev.target, "Err... Maybe you meant to say \002!fight {0}\002? They never challenged you.".format(ev.args[0]))
+                                return
+                    except KeyError:  # self.pendingFights[x] doesn't exist
+                        self.message(ev.target, "Err... Maybe you meant to say \002!fight {0}\002? They never challenged you.".format(ev.args[0]))
                         return
-                praiseroll = random.randint(1, 3)
-                self.players[ev.source.lower()]['praised'] = True
-                if self.deathmatch or self.versusone:
-                    if ev.source.lower() == self.currgamerecord.player1:
-                        self.currgamerecord.player1_praiseroll = praiseroll
+
+                    # Check if the challenger is here
+                    if ev.args[0].lower() not in map(str.lower, self.accounts):
+                        self.message(ev.target, "They're not here anymore - maybe they were intimidated by your donger.")
+                        del self.pendingFights[challenger]  # remove fight.
+                        return
+
+                    # OK! This player accepted the fight.
+                    self.pendingFights[challenger]['players'].append(ev.source)
+                    if not opportunist:
+                        self.pendingFights[challenger]['pendingaccept'].remove(ev.source.lower())
                     else:
-                        self.currgamerecord.player2_praiseroll = praiseroll
+                        self.pendingFights[challenger]['pendingaccept'].remove('*')
 
-                if self.client.user_id in self.turnlist:
-                    self.message(ev.target, "You DARE try and suckle my donger while fighting me?!")
-                    praiseroll = 2
-                    ptarget = self.players[ev.source.lower()]['nick']
+                    # Check if everybody accepted
+                    if not self.pendingFights[challenger]['pendingaccept']:
+                        # Start the game!
+                        self.start(self.pendingFights[challenger])
 
-                if praiseroll == 1:
-                    self.ascii("WHATEVER")
-                    self.heal(ptarget, True)  # Critical heal
-                elif praiseroll == 2:
-                    self.ascii("FUCK YOU")
-                    self.hit(ev.source, ptarget, True)
-                else:
-                    self.ascii("NOPE")
-                    self.getTurn()
-                self.countStat(ev.source, "praises")
-            elif ev.command == "cancel" and not self.gameRunning:
-                try:
-                    del self.pendingFights[ev.source.lower()]
-                    self.message(ev.target, "Fight cancelled.")
-                except KeyError:
-                    self.message(ev.target, "You can only !cancel if you started a fight.")
-                    return
-            elif ev.command == "reject" and not self.gameRunning:
-                if not ev.args:
-                    self.message(ev.target, "Can you read? It's !reject <nick>")
-                    return
+                elif ev.command == "hit" and self.gameRunning:
+                    if ev.source != self.turnlist[self.currentTurn]:
+                        self.message(self.channel, "It's not your fucking turn!")
+                        return
 
-                try:  # I could just use a try.. except in the .remove(), but I am too lazy to remove this chunk of code
-                    if ev.source.lower() not in self.pendingFights[self.accounts.get(ev.args[0].lower())]['pendingaccept']:
+                    if not ev.args:  # pick a random living thing
+                        livingThings = [self.players[player]['nick'] for player in self.players if self.players[player]['hp'] > 0 and player != ev.source.lower()]
+                        self.hit(ev.source, random.choice(livingThings))
+                    else:  # The user picked a thing. Check if it is alive
+                        if self.accounts.get(ev.args[0].lower()) not in self.players:
+                            self.message(self.channel, "You should hit something that is actually playing...")
+                            return
+                        if self.accounts.get(ev.args[0].lower()) == ev.source.lower():
+                            self.message(self.channel, "Stop hitting yourself!")
+                            return
+                        if self.players[self.accounts.get(ev.args[0].lower())]['hp'] <= 0:
+                            self.message(self.channel, "Do you REALLY want to hit a corpse?")
+                            return
+
+                        self.hit(ev.source, self.players[self.accounts.get(ev.args[0].lower())]['nick'])
+                elif ev.command == "heal" and self.gameRunning:
+                    if ev.source != self.turnlist[self.currentTurn]:
+                        self.message(self.channel, "It's not your fucking turn!")
+                        return
+
+                    self.heal(ev.source)
+                elif ev.command == "praise" and self.gameRunning:
+                    if ev.source != self.turnlist[self.currentTurn]:
+                        self.message(self.channel, "It's not your fucking turn!")
+                        return
+
+                    if self.deathmatch:
+                        self.message(ev.target, "You can't praise during deathmatches. It's still your turn.")
+                        return
+
+                    if self.players[ev.source.lower()]['praised']:
+                        self.message(ev.target, "You can only praise once per game. It's still your turn.")
+                        return
+
+                    if not ev.args:
+                        ptarget = ev.source
+                    else:
+                        try:
+                            ptarget = self.players[self.accounts.get(ev.args[0].lower(), ev.args[0])]['nick']
+                        except KeyError:
+                            self.message(ev.target, "Player not found.")
+                            return
+                    praiseroll = random.randint(1, 3)
+                    self.players[ev.source.lower()]['praised'] = True
+                    if self.deathmatch or self.versusone:
+                        if ev.source.lower() == self.currgamerecord.player1:
+                            self.currgamerecord.player1_praiseroll = praiseroll
+                        else:
+                            self.currgamerecord.player2_praiseroll = praiseroll
+
+                    if self.client.user_id in self.turnlist:
+                        self.message(ev.target, "You DARE try and suckle my donger while fighting me?!")
+                        praiseroll = 2
+                        ptarget = self.players[ev.source.lower()]['nick']
+
+                    if praiseroll == 1:
+                        self.ascii("WHATEVER")
+                        self.heal(ptarget, True)  # Critical heal
+                    elif praiseroll == 2:
+                        self.ascii("FUCK YOU")
+                        self.hit(ev.source, ptarget, True)
+                    else:
+                        self.ascii("NOPE")
+                        self.getTurn()
+                    self.countStat(ev.source, "praises")
+                elif ev.command == "cancel" and not self.gameRunning:
+                    try:
+                        del self.pendingFights[ev.source.lower()]
+                        self.message(ev.target, "Fight cancelled.")
+                    except KeyError:
+                        self.message(ev.target, "You can only !cancel if you started a fight.")
+                        return
+                elif ev.command == "reject" and not self.gameRunning:
+                    if not ev.args:
+                        self.message(ev.target, "Can you read? It's !reject <nick>")
+                        return
+
+                    try:  # I could just use a try.. except in the .remove(), but I am too lazy to remove this chunk of code
+                        if ev.source.lower() not in self.pendingFights[self.accounts.get(ev.args[0].lower())]['pendingaccept']:
+                            self.message(ev.target, "{0} didn't challenge you.".format(ev.args[0]))
+                            return
+                    except KeyError:  # if self.pendingFights[args[0].lower()] doesn't exist.
                         self.message(ev.target, "{0} didn't challenge you.".format(ev.args[0]))
                         return
-                except KeyError:  # if self.pendingFights[args[0].lower()] doesn't exist.
-                    self.message(ev.target, "{0} didn't challenge you.".format(ev.args[0]))
-                    return
 
-                self.pendingFights[self.accounts.get(ev.args[0].lower())]['pendingaccept'].remove(ev.source.lower())
-                self.message(ev.target, "\002{0}\002 fled the fight".format(ev.source))
+                    self.pendingFights[self.accounts.get(ev.args[0].lower())]['pendingaccept'].remove(ev.source.lower())
+                    self.message(ev.target, "\002{0}\002 fled the fight".format(ev.source))
 
-                if not self.pendingFights[self.accounts.get(ev.args[0].lower())]['pendingaccept']:
-                    if len(self.pendingFights[self.accounts.get(ev.args[0].lower())]['players']) == 1:  # only the challenger
-                        self.message(ev.target, "Fight cancelled.")
-                        del self.pendingFights[self.accounts.get(ev.args[0].lower())]
+                    if not self.pendingFights[self.accounts.get(ev.args[0].lower())]['pendingaccept']:
+                        if len(self.pendingFights[self.accounts.get(ev.args[0].lower())]['players']) == 1:  # only the challenger
+                            self.message(ev.target, "Fight cancelled.")
+                            del self.pendingFights[self.accounts.get(ev.args[0].lower())]
+                        else:
+                            self.start(self.pendingFights[self.accounts.get(ev.args[0].lower())])
+                elif ev.command == "quit" and self.gameRunning:
+                    self.cowardQuit(ev.source)
+                elif ev.command == "stats" and not self.gameRunning:
+                    if ev.args:
+                        nick = ev.args[0]
                     else:
-                        self.start(self.pendingFights[self.accounts.get(ev.args[0].lower())])
-            elif ev.command == "quit" and self.gameRunning:
-                self.cowardQuit(ev.source)
-            elif ev.command == "stats" and not self.gameRunning:
-                if ev.args:
-                    nick = ev.args[0]
-                else:
-                    nick = ev.source
+                        nick = ev.source
+                    try:
+                        nick = self.accounts[nick]
+                    except KeyError:
+                        pass
+
+                    stats = self.getStats(nick)
+
+                    if not stats:
+                        return self.message(ev.target, "No stats for \002{0}\002.".format(nick))
+
+                    balance = stats.wins - (stats.losses + stats.idleouts + (stats.quits * 2))
+
+                    balance = ("+" if balance > 0 else "") + str(balance)
+
+                    top = self.top_dongers().dicts()
+                    ranking = next((index for (index, d) in enumerate(top) if d['name'].lower() == stats.name.lower()), -1) + 1
+
+                    if ranking == 0:
+                        ranking = "\002Not ranked\002."
+                    elif ranking == 1:
+                        ranking = "Ranked \002\003071st\003\002"
+                    elif ranking == 2:
+                        ranking = "Ranked \002\003142nd\003\002"
+                    elif ranking == 3:
+                        ranking = "Ranked \002\003063rd\003\002"
+                    else:
+                        ranking = "Ranked \002{}th\002".format(ranking)
+                    #try:
+                    #    d0 = stats.lastplayed.date()
+                    #    today = datetime.datetime.now().date()
+                    #    delta = today - d0
+                    #    aelo = stats.elo - (int(delta.days)*2) #aelo (adjusted ELO) is equal to normal ELO minus (days since last played times two)
+                    #except:
+                    #    self.message(target, "You activated the special secret 1331589151jvlhjv feature!")
+
+                    self.message(ev.target, "\002{0}\002's stats: \002{1}\002 wins, \002{2}\002 losses, \002{4}\002 coward quits, \002{5}\002 idle-outs (\002{3}\002), "
+                                            "\002{6}\002 !praises, \002{7}\002 matches, \002{8}\002 deathmatches (\002{9}\002 total). "
+                                            "{11} (\002{10}\002 points)"
+                                            .format(stats.name, stats.wins, stats.losses, balance, stats.quits, stats.idleouts, stats.praises,
+                                                    stats.matches, stats.deathmatches, (stats.matches + stats.deathmatches), stats.elo, ranking))
+                elif ev.command in ("top", "shame") and not self.gameRunning:
+                    p = self.top_dongers((ev.command == "shame")).limit(5)  # If command == shame, then we're passing "True" into the top_dongers function below (in the "bottom" argument), overriding the default False
+                    if not p:
+                        return self.message(ev.target, "No top dongers.")
+                    c = 1
+                    for player in p:
+                        playernick = "{0}\u200b{1}".format(player.name[0], player.name[1:])
+
+                        self.message(ev.target, "{0} - \002{1}\002 (\002{2}\002)".format(c, playernick.upper(), player.elo))
+                        c += 1
+
+                    if config.get('stats-url'):
+                        self.message(ev.target, "Full stats at {}".format(config['stats-url']))
+            # Rate limiting
+            try:
+                if ev.target != self.channel:  # If the command is happening in a place besides the primary channel...
+                    if time.time() - self.lastheardfrom[ev.source] < 7:  # And it's been seven seconds since this person has made a command...
+                        if ev.source == self.sourcehistory[-2] and ev.source == self.sourcehistory[-1]:  # And they made the last two commands...
+                            if ev.source not in config['admins']:  # And the person is not an administrator...
+                                return  # Ignore it
+            except KeyError:
+                pass
+            finally:
+                self.lastheardfrom[ev.source] = time.time()
+                self.sourcehistory.append(ev.source)
+
+            # Regular commands
+            if ev.command == "raise":
+                self.message(ev.target, "ヽ༼ຈل͜ຈ༽ﾉ RAISE YOUR DONGERS ヽ༼ຈل͜ຈ༽ﾉ")
+            elif ev.command == "lower":
+                self.message(ev.target, "┌༼ຈل͜ຈ༽┐ ʟᴏᴡᴇʀ ʏᴏᴜʀ ᴅᴏɴɢᴇʀs ┌༼ຈل͜ຈ༽┐")
+            elif ev.command == "help":
+                exhelp = ""
+                for ch in self.cmdhelp.keys():
+                    if self.cmds[ch].adminonly and ev.source not in config['admins']:
+                        continue
+                    exhelp += "<li>!{}: {}</li>".format(ch, self.cmdhelp[ch])
+                self.html_message(ev.target, "Commands available only in <a href=\"https://matrix.to/#/{0}\">{0}</a>:".format(self.channel) +
+                            "<ul><li>!fight <nickname> [othernicknames]: Challenge another player, or multiple players.</li>" +
+                            "<li>!duel <nickname>: Same as fight, but only 1v1.</li>" +
+                            "<li>!deathmatch <nickname>: Same as duel, but the loser is bant for 20 minutes.</li>" +
+                            "<li>!ascii <text>: Turns any text 15 characters or less into ascii art</li>" +
+                            "<li>!cancel: Cancels a !fight</li>" +
+                            "<li>!reject <nick>: Rejects a !fight</li>" +
+                            "<li>!stats [player]: Outputs player's game stats (or your own stats)</li>" +
+                            "<li>!top, !shame: Lists the best, or the worst, players</li></ul>" +
+                            "Commands available everywhere: <ul>{0}</ul>".format(exhelp))
+            elif ev.command == "version":
                 try:
-                    nick = self.accounts[nick]
-                except KeyError:
+                    ver = subprocess.check_output(["git", "describe", "--tags"]).decode().strip()
+                    self.message(ev.target, "I am running {} ({})".format(ver, 'http://bit.ly/1pG2Hay'))
+                except:
+                    self.message(ev.target, "I have no idea.")
+            elif ev.command in self.extcmds:  # Extended commands support
+                try:
+                    if self.cmds[ev.command].adminonly and ev.source not in config['admins']:
+                        return
+                except AttributeError:
                     pass
-
-                stats = self.getStats(nick)
-
-                if not stats:
-                    return self.message(ev.target, "No stats for \002{0}\002.".format(nick))
-
-                balance = stats.wins - (stats.losses + stats.idleouts + (stats.quits * 2))
-
-                balance = ("+" if balance > 0 else "") + str(balance)
-
-                top = self.top_dongers().dicts()
-                ranking = next((index for (index, d) in enumerate(top) if d['name'].lower() == stats.name.lower()), -1) + 1
-
-                if ranking == 0:
-                    ranking = "\002Not ranked\002."
-                elif ranking == 1:
-                    ranking = "Ranked \002\003071st\003\002"
-                elif ranking == 2:
-                    ranking = "Ranked \002\003142nd\003\002"
-                elif ranking == 3:
-                    ranking = "Ranked \002\003063rd\003\002"
-                else:
-                    ranking = "Ranked \002{}th\002".format(ranking)
-                #try:
-                #    d0 = stats.lastplayed.date()
-                #    today = datetime.datetime.now().date()
-                #    delta = today - d0
-                #    aelo = stats.elo - (int(delta.days)*2) #aelo (adjusted ELO) is equal to normal ELO minus (days since last played times two)
-                #except:
-                #    self.message(target, "You activated the special secret 1331589151jvlhjv feature!")
-
-                self.message(ev.target, "\002{0}\002's stats: \002{1}\002 wins, \002{2}\002 losses, \002{4}\002 coward quits, \002{5}\002 idle-outs (\002{3}\002), "
-                                        "\002{6}\002 !praises, \002{7}\002 matches, \002{8}\002 deathmatches (\002{9}\002 total). "
-                                        "{11} (\002{10}\002 points)"
-                                        .format(stats.name, stats.wins, stats.losses, balance, stats.quits, stats.idleouts, stats.praises,
-                                                stats.matches, stats.deathmatches, (stats.matches + stats.deathmatches), stats.elo, ranking))
-            elif ev.command in ("top", "shame") and not self.gameRunning:
-                p = self.top_dongers((ev.command == "shame")).limit(5)  # If command == shame, then we're passing "True" into the top_dongers function below (in the "bottom" argument), overriding the default False
-                if not p:
-                    return self.message(ev.target, "No top dongers.")
-                c = 1
-                for player in p:
-                    playernick = "{0}\u200b{1}".format(player.name[0], player.name[1:])
-
-                    self.message(ev.target, "{0} - \002{1}\002 (\002{2}\002)".format(c, playernick.upper(), player.elo))
-                    c += 1
-
-                if config.get('stats-url'):
-                    self.message(ev.target, "Full stats at {}".format(config['stats-url']))
+                self.cmds[ev.command].doit(self, ev.target, ev.source)
 
 
     def cowardQuit(self, coward):
@@ -888,6 +939,32 @@ class DongerDong(object):
             elif (time.time() - self.turnStart > 35) and len(self.turnlist) >= (self.currentTurn + 1) and not self.poke:
                 self.poke = True
                 self.message(self.channel, "Wake up, \002{0}\002!".format(self.turnlist[self.currentTurn]), message_type='m.text')
+    
+    def import_extcmds(self):
+        self.cmdhelp = {}
+        try:
+            self.extcmds = config['extendedcommands']
+        except KeyError:
+            self.extcmds = []
+            logging.warning("No extended commands found in config.json")
+        logging.info("Beginning extended command tests")
+        self.cmds = {}
+        for command in self.extcmds:
+            try:  # Let's test these on start...
+                cmd = importlib.import_module('extcmd.{}'.format(command))
+                logging.info('Loading extended command: {}'.format(command))
+
+                try:  # Handling non-existent helptext
+                    self.cmdhelp[command] = cmd.helptext
+                except AttributeError:
+                    logging.warning('No helptext provided for command {}'.format(command))
+                    self.cmdhelp[command] = 'A mystery'
+                self.cmds[command] = cmd
+            except ImportError:
+                logging.warning("Failed to import specified extended command: {}".format(command))
+                self.extcmds.remove(command)
+                logging.warning("Removed command {} from list of available commands. You should fix config.json to remove it from there, too (or just fix the module).".format(command))
+        logging.info('Finished loading all the extended commands')
 
 
 # Database stuff

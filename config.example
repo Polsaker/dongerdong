@@ -1,15 +1,11 @@
 {
-    "server": "irc.freenode.net",
-    "nick": "botnick",
-    "channel": "#fightchannel",
-    "port": 6697,
-    "tls": true,
-    "nickserv_username": "dongeruser",
-    "nickserv_password": "yourpasswd",
-    "auxchans": [],
+    "homeserver": "https://phuks.co",
+    "channel": "!HQKJuYqkDkJNrwdYMc:phuks.co",
+    "username": "dongerdong",
+    "password": "dc37008278e1bde46a6c6b7625059972", 
     "extendedcommands": ["jaden","excuse","dong"],
+    "admins": ["@polsaker:phuks.co"]
     "topmodifier": 0.05,
-    "admins": ["Polsaker", "ravioli"],
     "stats-url": "http://www.donger.org/stats/",
     "show-ascii-art-text": true
 }

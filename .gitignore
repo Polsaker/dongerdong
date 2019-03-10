@@ -2,3 +2,5 @@
 *config.json*
 *.db
 *.log
+.python-version
+.token

@@ -397,7 +397,7 @@ class DongerDong(object):
             elif ev.command == "help":
                 exhelp = ""
                 for ch in self.cmdhelp.keys():
-                    if self.cmds[ch].adminonly and ev.source not in config['admins']:
+                    if getattr(self.cmds[ch], 'adminonly', False) and ev.source not in config['admins']:
                         continue
                     exhelp += "<li>!{}: {}</li>".format(ch, self.cmdhelp[ch])
                 self.html_message(ev.target, "Commands available only in <a href=\"https://matrix.to/#/{0}\">{0}</a>:".format(self.channel) +

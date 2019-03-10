@@ -383,7 +383,7 @@ class DongerDong(object):
                         if ev.source == self.sourcehistory[-2] and ev.source == self.sourcehistory[-1]:  # And they made the last two commands...
                             if ev.source not in config['admins']:  # And the person is not an administrator...
                                 return  # Ignore it
-            except KeyError:
+            except (KeyError, IndexError):
                 pass
             finally:
                 self.lastheardfrom[ev.source] = time.time()

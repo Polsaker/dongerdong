@@ -152,6 +152,9 @@ class DongerDong(object):
         
         ev = Message(data)
         print('> {0}'.format(ev))
+        
+        if ev.source == self.client.user_id:
+            return 
 
         if ev.is_command:
             if ev.target == self.channel:
@@ -529,21 +532,21 @@ class DongerDong(object):
             self.currgamerecord = GameStats.create(player1=pendingFight['players'][0],
                                                    player2=pendingFight['players'][1])
 
+        init_art = ''
         if self.deathmatch:
-            self.ascii("DEATHMATCH", font="fire_font-s", lineformat="\00304")
+            init_art = self.ascii("DEATHMATCH", font="fire_font-s", lineformat="\00304", ret=True)
 
         if len(pendingFight['players']) == 2:
-            self.ascii(" VS ".join(pendingFight['players']).upper(), "straight")
+            init_art = self.ascii(" VS ".join(pendingFight['players']).upper(), "straight", ret=True)
 
-        self.html_message(self.channel, "RULES:<br><ol><li>Wait your turn. One person at a time.</li><li>Be a dick about it.</li></ol><br>Use !hit [nick] to strike.<br>Use !heal to heal yourself.")
+        intro = init_art + "RULES:<br><ol><li>Wait your turn. One person at a time.</li><li>Be a dick about it.</li></ol><br>Use !hit [nick] to strike.<br>Use !heal to heal yourself."
         # TODO: join mid-fight
         #if not self.versusone:  # Users can't join a fight if it's versusone (duel or deathmatch)
         #    self.message(self.channel, "Use '/msg {0} !join' to join a game mid-fight.".format(self.client.user_id))
         if not self.deathmatch:  # Users can't praise if it's a deathmatch
             if self.client.user_id not in pendingFight['players'] or len(pendingFight['players']) > 2:
-                self.message(self.channel, "Use !praise [nick] to praise the donger gods (once per game).")
+                intro += "<br>Use !praise [nick] to praise the donger gods (once per game)."
 
-        self.message(self.channel, " ")
 
         # Set up the fight
         for player in pendingFight['players']:
@@ -557,7 +560,8 @@ class DongerDong(object):
             self.turnlist.append(player)
 
         random.shuffle(self.turnlist)
-        self.ascii("FIGHT")
+        intro += self.ascii("FIGHT", ret=True)
+        self.html_message(self.channel, intro)
 
         self.mute_room(self.turnlist)
 
@@ -617,6 +621,8 @@ class DongerDong(object):
         aliveplayers, survivor = self.getAlivePlayers()
 
         if aliveplayers == 1:  # one survivor, end game.
+            if tMessage:
+                self.message(self.channel, tMessage)
             self.win(survivor)
             return
 
@@ -630,27 +636,28 @@ class DongerDong(object):
         if self.players[self.turnlist[self.currentTurn].lower()]['hp'] > 0:  # it's alive!
             self.turnStart = time.time()
             self.poke = False
-            self.message(self.channel, tMessage + "It's \002{0}\002's turn.".format(self.turnlist[self.currentTurn]), message_type='m.text')
+            message = tMessage + "It's \002{0}\002's turn.\n".format(self.turnlist[self.currentTurn])
+            
             self.players[self.turnlist[self.currentTurn].lower()]['gdr'] = 1
             if self.turnlist[self.currentTurn] == self.client.user_id:
-                self.processAI()
+                self.processAI(eMessage=message)
+            else:
+                self.message(self.channel, message , message_type='m.text')
         else:  # It's dead, try again.
-            self.getTurn()
+            self.getTurn(tMessage=tMessage)
 
-    def processAI(self):
+    def processAI(self, eMessage=''):
         myself = self.players[self.client.user_id.lower()]
         # 1 - We will always hit a player with LESS than 25 HP.
         for i in self.players:
             if i == self.client.user_id.lower():
                 continue
             if self.players[i]['hp'] > 0 and self.players[i]['hp'] < 25:
-                self.message(self.channel, "!hit {0}".format(self.players[i]['nick']))
-                self.hit(self.client.user_id, self.players[i]['nick'])
+                self.hit(self.client.user_id, self.players[i]['nick'], eMessage=eMessage + "!hit {0}\n".format(self.players[i]['nick']))
                 return
 
         if myself['hp'] < 44 and myself['heals']:
-            self.message(self.channel, "!heal")
-            self.heal(self.client.user_id)
+            self.heal(self.client.user_id, eMessage=eMessage + "!heal\n")
         else:
             players = self.turnlist[:]
             players.remove(self.client.user_id)
@@ -659,12 +666,11 @@ class DongerDong(object):
                 hitting = self.players[random.choice(players).lower()]
                 if hitting['hp'] > 0:
                     victim = hitting
-            self.message(self.channel, "!hit {0}".format(victim['nick']))
-            self.hit(self.client.user_id, victim['nick'])
+            self.hit(self.client.user_id, victim['nick'], eMessage=eMessage + "!hit {0}\n".format(victim['nick']))
     
-    def heal(self, target, critical=False):
+    def heal(self, target, critical=False, eMessage=""):
         if not self.players[target.lower()]['heals'] and not critical:
-            self.message(self.channel, "You can't heal this turn (but it's still your turn)")
+            self.message(self.channel, eMessage + "You can't heal this turn (but it's still your turn)")
             return
 
         # The max amount of HP you can recover in a single turn depends on how many times you've
@@ -699,18 +705,17 @@ class DongerDong(object):
                 if critical:
                     self.currgamerecord.player2_praiseroll = +healing
 
-        self.message(self.channel, "\002{0}\002 heals for \002{1}HP\002, bringing them to \002{2}HP\002".format(
-            target, healing, self.players[target.lower()]['hp']))
-        self.getTurn()
+        message = eMessage + "\002{0}\002 heals for \002{1}HP\002, bringing them to \002{2}HP\002\n".format(target, healing, self.players[target.lower()]['hp'])
+        self.getTurn(message)
 
-    def hit(self, source, target, critical=False):
+    def hit(self, source, target, critical=False, eMessage=""):
         # Rolls.
         instaroll = random.randint(1, 75) if not self.versusone else 666
         critroll = random.randint(1, 12) if not critical else 1
         damage = random.randint(18, 35)
 
         if instaroll == 1:
-            self.ascii("INSTAKILL", lineformat="\00304")
+            self.ascii("INSTAKILL", lineformat="\00304", eMessage=eMessage)
             # remove player
             self.death(target, source)
             self.getTurn()
@@ -718,7 +723,7 @@ class DongerDong(object):
         if critroll == 1:
             damage *= 2
             if not critical:  # If it's not a forced critical hit (via !praise), then announce the critical
-                self.ascii("CRITICAL")
+                eMessage += self.ascii("CRITICAL", ret=True)
                 self.countStat(source, "crits")
         else:
             if not self.players[target.lower()]['gdr'] == 1:
@@ -749,13 +754,14 @@ class DongerDong(object):
                 if critical:
                     self.currgamerecord.player2_praiseroll = -damage
 
-        self.message(self.channel, "\002{0}\002 (\002{1}\002HP) deals \002{2}\002 damage to \002{3}\002 (\002{4}\002HP)".format(
-            source, sourcehealth, damage, target, self.players[target.lower()]['hp']))
+        message = eMessage + "\002{0}\002 (\002{1}\002HP) deals \002{2}\002 damage to \002{3}\002 (\002{4}\002HP)\n".format(source, sourcehealth, damage, target, self.players[target.lower()]['hp'])
 
         if self.players[target.lower()]['hp'] <= 0:
+            self.message(self.channel, message)
+            message = ''
             self.death(target, source)
 
-        self.getTurn()
+        self.getTurn(message)
 
     def death(self, victim, slayer):
         if self.deathmatch or self.versusone:
@@ -857,21 +863,22 @@ class DongerDong(object):
     def message(self, target, message, p_html=False, message_type='m.notice'):
         """ Compatibility layer for porting IRC modules """
         print(message)
-        if message == "":
+        if message.strip() == "":
             return
-        if "\002" in message or "\003" in message or "\x1f" in message or "\x1d" in message or p_html or re.search('@[a-zA-Z0-9.-_]+:[a-z0-9.-]+', message):
+        if "\002" in message or "\003" in message or "\x1f" in message or "\x1d" in message or p_html or re.search('@[a-zA-Z0-9.-_]+?:[a-z0-9.-]+', message):
             # transform from IRC to HTML and send..
             if not p_html:
                 message = html.escape(message)
             message = re.sub('\002(.*?)\002', '<b>\\1</b>', message)
             message = re.sub('\x1f(.*?)\x1f', '<u>\\1</u>', message)
             message = re.sub('\x1d(.*?)\x1d', '<i>\\1</i>', message)
+            message = message.replace('\n', '<br>')
             def replcolor(m):
                 return '<font color="{0}">{1}</font>'.format(IRC_COLOR_MAP[m.group(1)], m.group(2))
             message = re.sub(r'\003(\d{1,2})(.*?)\003', replcolor, message)
             def repltag(m):
                 return '<a href="https://matrix.to/#/{0}">{1}</a>'.format(m.group(0), self.users[m.group(0)])
-            message = re.sub('@[a-zA-Z0-9.-_]+:[a-z0-9.-]+', repltag, message)
+            message = re.sub('@[a-zA-Z0-9.-_]+?:[a-z0-9.-]+', repltag, message)
 
             return self.html_message(target, message, message_type)
                     
@@ -881,7 +888,7 @@ class DongerDong(object):
 
     def html_message(self, target, message, message_type='m.notice'):
         """ Sends an HTML message """
-        if message == "":
+        if message.strip() == "":
             return
         stripped = re.sub('<[^<]+?>', '', html.unescape(message))
 
@@ -904,18 +911,21 @@ class DongerDong(object):
             f_ud[us['user_id']] = us['content']['displayname']
         return (f_us, f_ud)
     
-    def ascii(self, key, font='smslant', lineformat=""):
+    def ascii(self, key, font='smslant', lineformat="", ret=False, eMessage=''):
         def repltag(m):
                 return self.users[m.group(0).lower()].upper()
-        key = re.sub('@[a-zA-Z0-9.-_]+:[A-Z0-9.-]+', repltag, key)
+        key = re.sub('@[a-zA-Z0-9.-_]+?:[A-Z0-9.-]+', repltag, key)
         try:
             if not config['show-ascii-art-text']:
-                self.message(self.channel, key)
-                return ''
+                self.message(self.channel, eMessage + key)
+                return
         except KeyError:
             logging.warning("Plz set the show-ascii-art-text config. kthx")
         lines = [lineformat + name for name in Figlet(font).renderText(key).split("\n")[:-1] if name.strip()]
-        self.html_message(self.channel, '<pre><code>' + "\n".join(lines) + '</code></pre>')
+        if ret:
+            return eMessage + '<pre><code>' + "\n".join(lines) + '</code></pre>'
+        else:
+            self.html_message(self.channel, eMessage + '<pre><code>' + "\n".join(lines) + '</code></pre>')
 
     def _timeout(self):
         while True:

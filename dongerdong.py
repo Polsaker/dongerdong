@@ -610,7 +610,7 @@ class DongerDong(object):
         
         return (aliveplayers, survivor)
     
-    def getTurn(self):
+    def getTurn(self, tMessage=""):
         if self.deathmatch or self.versusone:
             self.currgamerecord.turns += 1
 
@@ -630,7 +630,7 @@ class DongerDong(object):
         if self.players[self.turnlist[self.currentTurn].lower()]['hp'] > 0:  # it's alive!
             self.turnStart = time.time()
             self.poke = False
-            self.message(self.channel, "It's \002{0}\002's turn.".format(self.turnlist[self.currentTurn]), message_type='m.text')
+            self.message(self.channel, tMessage + "It's \002{0}\002's turn.".format(self.turnlist[self.currentTurn]), message_type='m.text')
             self.players[self.turnlist[self.currentTurn].lower()]['gdr'] = 1
             if self.turnlist[self.currentTurn] == self.client.user_id:
                 self.processAI()
@@ -857,6 +857,8 @@ class DongerDong(object):
     def message(self, target, message, p_html=False, message_type='m.notice'):
         """ Compatibility layer for porting IRC modules """
         print(message)
+        if message == "":
+            return
         if "\002" in message or "\003" in message or "\x1f" in message or "\x1d" in message or p_html or re.search('@[a-zA-Z0-0.-_]+:[a-z0-0.-]+', message):
             # transform from IRC to HTML and send..
             if not p_html:
@@ -879,6 +881,8 @@ class DongerDong(object):
 
     def html_message(self, target, message, message_type='m.notice'):
         """ Sends an HTML message """
+        if message == "":
+            return
         stripped = re.sub('<[^<]+?>', '', html.unescape(message))
 
         self.client.api.send_message_event(room_id=target, event_type='m.room.message',

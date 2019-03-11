@@ -599,10 +599,7 @@ class DongerDong(object):
 
         return players
     
-    def getTurn(self):
-        if self.deathmatch or self.versusone:
-            self.currgamerecord.turns += 1
-
+    def getAlivePlayers(self):
         # Step 1: Check for alive players.
         aliveplayers = 0
         # TODO: Do this in a neater way
@@ -610,6 +607,14 @@ class DongerDong(object):
             if self.players[p]['hp'] > 0:
                 aliveplayers += 1
                 survivor = p
+        
+        return (aliveplayers, survivor)
+    
+    def getTurn(self):
+        if self.deathmatch or self.versusone:
+            self.currgamerecord.turns += 1
+
+        aliveplayers, survivor = self.getAlivePlayers()
 
         if aliveplayers == 1:  # one survivor, end game.
             self.win(survivor)
@@ -792,16 +797,6 @@ class DongerDong(object):
 
     def win(self, winner, realwin=True):
         losers = [self.players[player]['nick'] for player in self.players if self.players[player]['hp'] <= 0]
-        
-        # Reset fight-related variables
-        self.deathmatch = False
-        self.versusone = False
-        self.gameRunning = False
-        self.turnStart = 0
-        self.players = {}
-        self.turnlist = []
-        self.accountlist = []
-        self.currentTurn = -1
 
         # Clean everything up.
         self.restore_room()
@@ -843,6 +838,16 @@ class DongerDong(object):
             player2.elo = int(round(player2.elo + k2 * (0 - e2), 0))
             player1.save()
             player2.save()
+        
+        # Reset fight-related variables
+        self.deathmatch = False
+        self.versusone = False
+        self.gameRunning = False
+        self.turnStart = 0
+        self.players = {}
+        self.turnlist = []
+        self.accountlist = []
+        self.currentTurn = -1
 
     def chunks(self, l, n):
         """Yield successive n-sized chunks from l."""
@@ -937,6 +942,9 @@ class DongerDong(object):
                 else:
                     self.getTurn()
             elif (time.time() - self.turnStart > 35) and len(self.turnlist) >= (self.currentTurn + 1) and not self.poke:
+                aliveplayers, survivor = self.getAlivePlayers()
+                if aliveplayers == 1:
+                    continue
                 self.poke = True
                 self.message(self.channel, "Wake up, \002{0}\002!".format(self.turnlist[self.currentTurn]), message_type='m.text')
     

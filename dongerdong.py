@@ -859,7 +859,7 @@ class DongerDong(object):
         print(message)
         if message == "":
             return
-        if "\002" in message or "\003" in message or "\x1f" in message or "\x1d" in message or p_html or re.search('@[a-zA-Z0-0.-_]+:[a-z0-0.-]+', message):
+        if "\002" in message or "\003" in message or "\x1f" in message or "\x1d" in message or p_html or re.search('@[a-zA-Z0-9.-_]+:[a-z0-9.-]+', message):
             # transform from IRC to HTML and send..
             if not p_html:
                 message = html.escape(message)
@@ -871,7 +871,7 @@ class DongerDong(object):
             message = re.sub(r'\003(\d{1,2})(.*?)\003', replcolor, message)
             def repltag(m):
                 return '<a href="https://matrix.to/#/{0}">{1}</a>'.format(m.group(0), self.users[m.group(0)])
-            message = re.sub('@[a-zA-Z0-0.-_]+:[a-z0-0.-]+', repltag, message)
+            message = re.sub('@[a-zA-Z0-9.-_]+:[a-z0-9.-]+', repltag, message)
 
             return self.html_message(target, message, message_type)
                     
@@ -907,7 +907,7 @@ class DongerDong(object):
     def ascii(self, key, font='smslant', lineformat=""):
         def repltag(m):
                 return self.users[m.group(0).lower()].upper()
-        key = re.sub('@[a-zA-Z0-0.-_]+:[A-Z0-0.-]+', repltag, key)
+        key = re.sub('@[a-zA-Z0-9.-_]+:[A-Z0-9.-]+', repltag, key)
         try:
             if not config['show-ascii-art-text']:
                 self.message(self.channel, key)

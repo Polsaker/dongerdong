@@ -642,7 +642,7 @@ class DongerDong(object):
             if self.turnlist[self.currentTurn] == self.client.user_id:
                 self.processAI(eMessage=message)
             else:
-                self.message(self.channel, message , message_type='m.text')
+                self.message(self.channel, message , message_type='m.text', p_html=True)
         else:  # It's dead, try again.
             self.getTurn(tMessage=tMessage)
 

@@ -715,7 +715,7 @@ class DongerDong(object):
         damage = random.randint(18, 35)
 
         if instaroll == 1:
-            self.ascii("INSTAKILL", lineformat="\00304", eMessage=eMessage)
+            self.ascii("INSTAKILL", eMessage=eMessage)
             # remove player
             self.death(target, source)
             self.getTurn()
